@@ -1,0 +1,102 @@
+---
+title: "Predicting Activity Type For Weight Lifting Exercises"
+author: "Venkat Reddy"
+date: "April 23, 2015"
+output: html_document
+---
+
+## Summary
+Six different persons were asked to perform barbell weight lifts correctly and incorrectly in 5 different ways. For these activities, data is collected from accelorometers which are banded to different parts of the body. Our predictive model predicts one of the 5 specific ways in which an activity could have been performed, from the data for an activity. The model is based on Random Forest technique, which is chosen for its very low out-testing error rate. We have used FSelector package's hill climbing search method for identifying an optimal subset of features for training the model.
+
+```{r code1, echo=FALSE}
+options(warn=-1)
+set.seed(1234)
+```
+
+## Inputing Data
+```{r code2}
+# training data
+training_raw <- read.csv("pml-training.csv", ,na.strings = c("", "NA","#DIV/0!"), )
+
+# testcases data
+testcases_raw <- read.csv("pml-testing.csv", na.strings = c("", "NA", "#DIV/0!"))
+```
+## Cleaning data
+```{r code3}
+# Drop columns with NAs
+training_data <- training_raw[ , ! apply( training_raw , 2 , function(x) any(is.na(x)) ) ]
+# Drop Columns irrelevant such userid, window, etc
+training_data <- training_data[,c(-1, -2, -3, -4, -5, -6, -7)]
+```
+
+## Selecting Optimal Features subset
+We select an optimal subset of features using FSelector package's hill climbing search method.
+```{r code4}
+library(FSelector)
+library(caret)
+library(rpart)
+# Evaluator to select the feature subset 
+evaluator <- function (subset) {
+        k= 5
+        set.seed(2)
+        ind = sample(5, nrow(training_data), replace = TRUE) 
+        results = sapply(1:k, function(i) {
+                train = training_data[ind ==i,]
+                test  = training_data[ind !=i,]      
+                tree  = rpart(as.simple.formula(subset, "classe"), training_data)
+                error.rate = sum(test$churn != predict(tree, test,type="class")) / nrow(test)
+                return(1 - error.rate)  })
+        return(mean(results)) 
+}
+# Find the optimum feature subset 
+attr.subset = hill.climbing.search(names(training_data)[!names(training_data) %in% "classe"], evaluator)
+
+# Data with optimal feature subset
+training_data <- training_data[, c(attr.subset, "classe")]
+testcases <- testcases_raw[,attr.subset]
+```
+ 
+## Splitting training_data 
+We split training_data into training and testing. We use the former for finding stable model using cross validation. We use the latter to find out test error rate evaluating the  model.
+```{r code5}
+inTrain <- createDataPartition(y=training_data$classe, p=0.70, list=FALSE)
+
+training <- training_data[inTrain,]
+testing <- training_data[-inTrain,] 
+```
+## Model Building
+### Control for Cross validation 
+We use K fold cross validation for reducing the bias of the model that is to be trained from training data. We set below the variable *control* for use with train method.
+```{r code6}
+control = trainControl(method="cv", number=10)
+```
+
+### Training Random Forest Technique Based Model
+Our predictive problem is a classification problem. Hence we use Random Forest method for finding a classifier.
+```{r code7, echo=FALSE}
+set.seed(1234)
+```
+```{r code8}
+library(randomForest)
+model_RF = train(classe~., data=training, method="rf", preProcess="scale", trControl=control)
+model_RF
+```
+### Testing RF Model Accuracy
+```{r code9}
+# Predictions for test data
+predictions_RF <- predict(model_RF,newdata=testing)
+# Confusion matrix
+confusionMatrix(predictions_RF,testing$classe)
+error.rate <- sum(predictions_RF != testing$classe) / nrow(testing)
+error.rate
+```
+The model has a very low out-testing error rate = `r error.rate` for *testing* data.
+
+### Predictions for Testcases using model_RF
+```{r code10}
+predictions_testcases <- predict(model_RF,newdata=testcases)
+predictions_testcases
+```
+
+## Conclusion
+We have proposed  a model to predict the type of activity using Random Forest method, along with K fold cross validation. The model has out testing error rate `r error.rate`. Cross validation is used for reducing the bias of training set for model parameter identification.
